@@ -61,7 +61,7 @@ No administrator access is normally required.
 
 Tray changes are saved immediately. Targets are stored by executable process
 name, so normal application updates can move the executable without breaking
-the rule.
+the rule. At least one watched application must remain.
 
 ## Local data
 

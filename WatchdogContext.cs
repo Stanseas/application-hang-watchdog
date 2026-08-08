@@ -231,13 +231,20 @@ internal sealed class WatchdogContext : ApplicationContext
             watchedAppsItem.DropDownItems.Add(new ToolStripMenuItem(processName) { Checked = true, Enabled = false });
 
             var removeTarget = processName;
-            removeAppItem.DropDownItems.Add(new ToolStripMenuItem(processName, null, (_, _) => RemoveApplication(removeTarget)));
+            removeAppItem.DropDownItems.Add(new ToolStripMenuItem(processName, null, (_, _) => RemoveApplication(removeTarget))
+            {
+                Enabled = settings.ProcessNames.Length > 1
+            });
         }
 
         watchedAppsItem.DropDownItems.Add(new ToolStripSeparator());
         watchedAppsItem.DropDownItems.Add(addRunningAppItem);
         watchedAppsItem.DropDownItems.Add(new ToolStripMenuItem("Add Application...", null, (_, _) => AddApplication()));
-        removeAppItem.Enabled = settings.ProcessNames.Length > 1;
+        if (settings.ProcessNames.Length == 1)
+        {
+            removeAppItem.DropDownItems.Add(new ToolStripSeparator());
+            removeAppItem.DropDownItems.Add(new ToolStripMenuItem("At least one app must remain.") { Enabled = false });
+        }
         watchedAppsItem.DropDownItems.Add(removeAppItem);
     }
 
