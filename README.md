@@ -72,6 +72,11 @@ Settings and logs stay on the computer:
 %LOCALAPPDATA%\ApplicationHangWatchdog\incidents.log
 ```
 
+The `_note` field in `settings.json` explains edit behavior inside the file.
+Manual edits take effect after restart; tray-menu changes apply immediately.
+Existing installations using the earlier data-folder name continue using that
+folder so their settings and incident history remain intact.
+
 ## Build
 
 Requires the .NET 8 SDK on Windows:

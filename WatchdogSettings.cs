@@ -1,9 +1,13 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ApplicationHangWatchdog;
 
 internal sealed class WatchdogSettings
 {
+    [JsonPropertyName("_note")]
+    public string Note { get; set; } = "This file is provided for transparency. Manual changes take effect after the watchdog restarts; tray-menu changes apply immediately.";
+
     public string[] ProcessNames { get; set; } = ["FalloutNV"];
     public int PollIntervalSeconds { get; set; } = 2;
     public int HangThresholdSeconds { get; set; } = 30;

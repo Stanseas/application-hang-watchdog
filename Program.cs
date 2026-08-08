@@ -7,9 +7,13 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        var dataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ApplicationHangWatchdog");
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var dataDirectory = Path.Combine(localData, "ApplicationHangWatchdog");
+        var legacyDataDirectory = Path.Combine(localData, "FalloutHangWatchdog");
+        if (!Directory.Exists(dataDirectory) && Directory.Exists(legacyDataDirectory))
+        {
+            dataDirectory = legacyDataDirectory;
+        }
         var settingsPath = Path.Combine(dataDirectory, "settings.json");
         var log = new IncidentLog(Path.Combine(dataDirectory, "incidents.log"));
         var settings = WatchdogSettings.Load(settingsPath);
