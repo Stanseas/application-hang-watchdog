@@ -11,6 +11,18 @@ window switching difficult to use. The watchdog waits for a sustained,
 Windows-confirmed hang, releases cursor confinement, and terminates the frozen
 process tree.
 
+This project began after an observed Fallout: New Vegas full-screen freeze.
+The exact engine fault was not proven, but the game stopped processing window
+messages while its full-screen window still held the foreground input context
+and confined cursor. Windows itself remained alive, yet the mouse and keyboard
+could not reliably reach Task Manager or another desktop long enough to end the
+game normally.
+
+Because the watchdog runs as a separate process, it can detect the unresponsive
+window from outside the game, call Windows to release cursor confinement, and
+force-terminate the watched process tree. It does not delete the application,
+save files, or other files on disk.
+
 The default target is `FalloutNV.exe`. Other applications can be added from a
 list of running apps or by selecting an executable.
 
