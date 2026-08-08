@@ -19,6 +19,7 @@ internal sealed class WatchdogContext : ApplicationContext
     private readonly ToolStripMenuItem statusItem;
     private readonly ToolStripMenuItem cancelItem;
     private readonly ToolStripMenuItem startupItem;
+    private readonly ToolStripMenuItem manualRescueItem;
     private readonly ToolStripMenuItem watchedAppsItem;
     private readonly ToolStripMenuItem addRunningAppItem;
     private readonly ToolStripMenuItem removeAppItem;
@@ -35,9 +36,10 @@ internal sealed class WatchdogContext : ApplicationContext
         cancelItem = new ToolStripMenuItem("Cancel Current Rescue", null, (_, _) => CancelCurrentRescue()) { Enabled = false };
         startupItem = new ToolStripMenuItem("Start With Windows", null, (_, _) => ToggleStartup())
         {
-            Checked = StartupRegistration.IsInstalled(),
+            Checked = StartupRegistration.IsInstalled(Environment.ProcessPath!),
             CheckOnClick = false
         };
+        manualRescueItem = new ToolStripMenuItem("Manual Rescue");
         watchedAppsItem = new ToolStripMenuItem("Watched Apps");
         addRunningAppItem = new ToolStripMenuItem("Add Running Application");
         addRunningAppItem.DropDownOpening += (_, _) => RebuildRunningAppsMenu();
@@ -47,11 +49,14 @@ internal sealed class WatchdogContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(statusItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Rescue Watched Apps Now", null, (_, _) => ManualRescue()));
+        menu.Items.Add(manualRescueItem);
         menu.Items.Add(cancelItem);
         menu.Items.Add(watchedAppsItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Open Incident Log", null, (_, _) => log.Open()));
+        var incidentLogItem = new ToolStripMenuItem("Incident Log");
+        incidentLogItem.DropDownItems.Add(new ToolStripMenuItem("Open", null, (_, _) => log.Open()));
+        incidentLogItem.DropDownItems.Add(new ToolStripMenuItem("Clear...", null, (_, _) => ClearIncidentLog()));
+        menu.Items.Add(incidentLogItem);
         menu.Items.Add(new ToolStripMenuItem("Open Settings", null, (_, _) => OpenSettings()));
         menu.Items.Add(startupItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -186,9 +191,9 @@ internal sealed class WatchdogContext : ApplicationContext
         }
     }
 
-    private void ManualRescue()
+    private void ManualRescue(string processName)
     {
-        var results = RescueService.RescueNow(settings.ProcessNames, log);
+        var results = RescueService.RescueNow([processName], log);
         trayIcon.ShowBalloonTip(7000, "Application rescue", string.Join(Environment.NewLine, results), ToolTipIcon.Info);
     }
 
@@ -204,15 +209,16 @@ internal sealed class WatchdogContext : ApplicationContext
 
     private void ToggleStartup()
     {
-        if (StartupRegistration.IsInstalled())
+        var executablePath = Environment.ProcessPath!;
+        if (StartupRegistration.IsInstalled(executablePath))
         {
             StartupRegistration.Uninstall();
         }
         else
         {
-            StartupRegistration.Install(Environment.ProcessPath!);
+            StartupRegistration.Install(executablePath);
         }
-        startupItem.Checked = StartupRegistration.IsInstalled();
+        startupItem.Checked = StartupRegistration.IsInstalled(executablePath);
         log.Write($"Start-with-Windows changed | Enabled={startupItem.Checked}");
     }
 
@@ -221,14 +227,34 @@ internal sealed class WatchdogContext : ApplicationContext
         Process.Start(new ProcessStartInfo("notepad.exe", settingsPath) { UseShellExecute = true });
     }
 
+    private void ClearIncidentLog()
+    {
+        var confirmation = MessageBox.Show(
+            "Clear the incident log?",
+            "Application Hang Watchdog",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button2);
+        if (confirmation != DialogResult.Yes)
+        {
+            return;
+        }
+
+        log.Clear();
+        trayIcon.ShowBalloonTip(4000, "Incident log cleared", "A timestamped clear marker is the only remaining entry.", ToolTipIcon.Info);
+    }
+
     private void RebuildWatchedAppsMenu()
     {
         watchedAppsItem.DropDownItems.Clear();
+        manualRescueItem.DropDownItems.Clear();
         removeAppItem.DropDownItems.Clear();
 
         foreach (var processName in settings.ProcessNames.Order(StringComparer.OrdinalIgnoreCase))
         {
             watchedAppsItem.DropDownItems.Add(new ToolStripMenuItem(processName) { Checked = true, Enabled = false });
+            manualRescueItem.DropDownItems.Add(
+                new ToolStripMenuItem(processName, null, (_, _) => ManualRescue(processName)));
 
             var removeTarget = processName;
             removeAppItem.DropDownItems.Add(new ToolStripMenuItem(processName, null, (_, _) => RemoveApplication(removeTarget))
@@ -253,6 +279,8 @@ internal sealed class WatchdogContext : ApplicationContext
         addRunningAppItem.DropDownItems.Clear();
 
         var runningApps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var currentSessionId = Process.GetCurrentProcess().SessionId;
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         foreach (var process in Process.GetProcesses())
         {
             using (process)
@@ -260,8 +288,11 @@ internal sealed class WatchdogContext : ApplicationContext
                 try
                 {
                     if (process.Id == Environment.ProcessId ||
+                        process.SessionId != currentSessionId ||
                         process.MainWindowHandle == IntPtr.Zero ||
                         string.IsNullOrWhiteSpace(process.MainWindowTitle) ||
+                        process.MainWindowTitle.StartsWith('_') ||
+                        IsUnderDirectory(process.MainModule?.FileName, windowsDirectory) ||
                         settings.ProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
                     {
                         continue;
@@ -289,6 +320,18 @@ internal sealed class WatchdogContext : ApplicationContext
             addRunningAppItem.DropDownItems.Add(
                 new ToolStripMenuItem("No unwatched applications are open") { Enabled = false });
         }
+    }
+
+    private static bool IsUnderDirectory(string? filePath, string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return true;
+        }
+
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath)) + Path.DirectorySeparatorChar;
+        var file = Path.GetFullPath(filePath);
+        return file.StartsWith(directory, StringComparison.OrdinalIgnoreCase);
     }
 
     private void AddApplication()

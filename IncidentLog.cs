@@ -23,4 +23,12 @@ internal sealed class IncidentLog(string path)
 
         Process.Start(new ProcessStartInfo("notepad.exe", Path) { UseShellExecute = true });
     }
+
+    public void Clear()
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        File.WriteAllText(
+            Path,
+            $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} | Log cleared{Environment.NewLine}");
+    }
 }

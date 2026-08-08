@@ -7,10 +7,12 @@ internal static class StartupRegistration
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "ApplicationHangWatchdog";
 
-    public static bool IsInstalled()
+    public static bool IsInstalled(string executablePath)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: false);
-        return key?.GetValue(ValueName) is string;
+        var registeredCommand = key?.GetValue(ValueName) as string;
+        var expectedCommand = $"\"{Path.GetFullPath(executablePath)}\" --startup";
+        return string.Equals(registeredCommand, expectedCommand, StringComparison.OrdinalIgnoreCase);
     }
 
     public static void Install(string executablePath)

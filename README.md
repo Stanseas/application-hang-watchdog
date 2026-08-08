@@ -4,6 +4,8 @@ A small Windows tray app that recovers the desktop when Fallout: New Vegas, or
 another configured full-screen application, becomes unresponsive and traps the
 mouse and keyboard.
 
+[Change history](CHANGELOG.md)
+
 ## Use case
 
 Some full-screen hangs leave Windows running but make Task Manager and normal
@@ -40,28 +42,44 @@ work in that application will be lost.
 
 ## Install
 
-1. Download `ApplicationHangWatchdog.exe` from the latest GitHub release.
+1. Download `ApplicationHangWatchdog.exe` from the
+   [latest GitHub release](https://github.com/Stanseas/application-hang-watchdog/releases/latest).
 2. Install the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
    if Windows requests it.
-3. Run the executable. A shield icon appears in the system tray.
-4. Right-click the shield and enable **Start With Windows** if desired.
+3. Move the executable to a permanent folder, then run it. A shield icon
+   appears in the system tray.
+4. Right-click the shield and turn on **Start With Windows** if you want the
+   watchdog to launch automatically when you sign in.
 
 No administrator access is normally required.
 
 ## Tray menu
 
-- **Rescue Watched Apps Now** performs an immediate manual rescue.
+- **Manual Rescue** selects one watched application for immediate rescue.
 - **Cancel Current Rescue** suppresses the active countdown.
 - **Watched Apps > Add Running Application** lists open apps with visible
   windows.
 - **Watched Apps > Add Application...** selects an executable from disk.
 - **Watched Apps > Remove Application** removes a target.
-- **Open Incident Log** opens the compact event log.
+- **Incident Log > Open** opens the compact event log.
+- **Incident Log > Clear...** replaces the log with one timestamped clear marker.
 - **Open Settings** opens advanced JSON settings.
+- **Start With Windows** launches the watchdog automatically when you sign in.
 
 Tray changes are saved immediately. Targets are stored by executable process
 name, so normal application updates can move the executable without breaking
 the rule. At least one watched application must remain.
+
+The running-app list is limited to interactive applications in the current
+user session. Windows system components and helper windows are hidden; use
+**Add Application...** when an intentionally selected app is filtered out.
+
+## Uninstall
+
+1. Turn off **Start With Windows** from the tray menu.
+2. Select **Exit** from the tray menu.
+3. Delete `ApplicationHangWatchdog.exe`.
+4. Optionally delete its local-data folder shown below.
 
 ## Local data
 
