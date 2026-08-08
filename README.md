@@ -95,6 +95,13 @@ Manual edits take effect after restart; tray-menu changes apply immediately.
 Existing installations using the earlier data-folder name continue using that
 folder so their settings and incident history remain intact.
 
+### Advanced setting
+
+Power users can change `HangThresholdSeconds` in `settings.json` to adjust the
+default 30-second rescue timer. Values are limited to 15 through 300 seconds,
+and the watchdog must be restarted after a manual edit. This setting is kept
+out of the tray menu to prevent accidental changes.
+
 ## Build
 
 Requires the .NET 8 SDK on Windows:
