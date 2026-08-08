@@ -20,8 +20,7 @@ game normally.
 
 Because the watchdog runs as a separate process, it can detect the unresponsive
 window from outside the game, call Windows to release cursor confinement, and
-force-terminate the watched process tree. It does not delete the application,
-save files, or other files on disk.
+force-terminate the watched process tree.
 
 The default target is `FalloutNV.exe`. Other applications can be added from a
 list of running apps or by selecting an executable.
