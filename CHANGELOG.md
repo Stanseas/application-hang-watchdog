@@ -1,5 +1,19 @@
 # Change History
 
+## 1.1.0 - 2026-08-11
+
+- Removed the blocking confirmation dialog when adding a watched application.
+  Selection now saves immediately and reports success through a non-blocking
+  tray notification so full-screen applications cannot hide a required dialog.
+- Removed the blocking confirmation dialog when removing a watched application.
+  Removal now saves immediately and reports success through a non-blocking tray
+  notification. The final watched application still cannot be removed.
+- Added a persistent **Watch All Full-Screen Apps** override. When enabled, the
+  watchdog ignores the saved list for automatic monitoring and dynamically
+  tracks application windows that cover an entire monitor. Windows shell,
+  system, and known game-overlay helper processes are excluded. Turning the
+  override off restores the saved list.
+
 ## 1.0.2 - 2026-08-08
 
 - Changed manual rescue to select one watched application instead of
