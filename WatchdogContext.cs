@@ -4,6 +4,25 @@ namespace ApplicationHangWatchdog;
 
 internal sealed class WatchdogContext : ApplicationContext
 {
+    private static readonly HashSet<string> ProtectedSystemProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ApplicationFrameHost",
+        "dwm",
+        "EOSOverlayRenderer-Win64-Shipping",
+        "explorer",
+        "GameBar",
+        "GameBarFTServer",
+        "LockApp",
+        "LogonUI",
+        "NVIDIA Overlay",
+        "SearchHost",
+        "ShellExperienceHost",
+        "StartMenuExperienceHost",
+        "steamwebhelper",
+        "SystemSettings",
+        "TextInputHost"
+    };
+
     private sealed class HangState
     {
         public required DateTimeOffset FirstDetected { get; init; }
@@ -19,12 +38,16 @@ internal sealed class WatchdogContext : ApplicationContext
     private readonly ToolStripMenuItem statusItem;
     private readonly ToolStripMenuItem cancelItem;
     private readonly ToolStripMenuItem startupItem;
+    private readonly ToolStripMenuItem fullscreenOverrideItem;
     private readonly ToolStripMenuItem manualRescueItem;
     private readonly ToolStripMenuItem watchedAppsItem;
     private readonly ToolStripMenuItem addRunningAppItem;
     private readonly ToolStripMenuItem removeAppItem;
     private readonly System.Windows.Forms.Timer timer;
     private readonly Dictionary<int, HangState> hangs = [];
+    private readonly Dictionary<int, string> fullscreenProcesses = [];
+    private readonly int currentSessionId = Process.GetCurrentProcess().SessionId;
+    private readonly string windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
     public WatchdogContext(WatchdogSettings settings, IncidentLog log, string settingsPath)
     {
@@ -39,6 +62,11 @@ internal sealed class WatchdogContext : ApplicationContext
             Checked = StartupRegistration.IsInstalled(Environment.ProcessPath!),
             CheckOnClick = false
         };
+        fullscreenOverrideItem = new ToolStripMenuItem("Watch All Full-Screen Apps", null, (_, _) => ToggleFullscreenOverride())
+        {
+            Checked = settings.WatchAllFullscreenApps,
+            CheckOnClick = false
+        };
         manualRescueItem = new ToolStripMenuItem("Manual Rescue");
         watchedAppsItem = new ToolStripMenuItem("Watched Apps");
         addRunningAppItem = new ToolStripMenuItem("Add Running Application");
@@ -51,6 +79,7 @@ internal sealed class WatchdogContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(manualRescueItem);
         menu.Items.Add(cancelItem);
+        menu.Items.Add(fullscreenOverrideItem);
         menu.Items.Add(watchedAppsItem);
         menu.Items.Add(new ToolStripSeparator());
         var incidentLogItem = new ToolStripMenuItem("Incident Log");
@@ -78,7 +107,7 @@ internal sealed class WatchdogContext : ApplicationContext
         };
         timer.Tick += (_, _) => Poll();
 
-        log.Write($"Watchdog started | Threshold={settings.HangThresholdSeconds}s | Poll={settings.PollIntervalSeconds}s | RequireForeground={settings.RequireForegroundDuringHang}");
+        log.Write($"Watchdog started | Threshold={settings.HangThresholdSeconds}s | Poll={settings.PollIntervalSeconds}s | RequireForeground={settings.RequireForegroundDuringHang} | FullscreenOverride={settings.WatchAllFullscreenApps}");
         Poll();
     }
 
@@ -87,14 +116,21 @@ internal sealed class WatchdogContext : ApplicationContext
         var seen = new HashSet<int>();
         var foregroundPid = NativeMethods.ForegroundProcessId();
 
-        foreach (var name in settings.ProcessNames)
+        if (settings.WatchAllFullscreenApps)
         {
-            foreach (var process in Process.GetProcessesByName(name))
+            PollFullscreenApplications(seen, foregroundPid);
+        }
+        else
+        {
+            foreach (var name in settings.ProcessNames)
             {
-                using (process)
+                foreach (var process in Process.GetProcessesByName(name))
                 {
-                    seen.Add(process.Id);
-                    Evaluate(process, foregroundPid);
+                    using (process)
+                    {
+                        seen.Add(process.Id);
+                        Evaluate(process, foregroundPid);
+                    }
                 }
             }
         }
@@ -107,13 +143,77 @@ internal sealed class WatchdogContext : ApplicationContext
         UpdateTrayStatus();
     }
 
-    private void Evaluate(Process process, uint foregroundPid)
+    private void PollFullscreenApplications(HashSet<int> seen, uint foregroundPid)
+    {
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    if (!TryGetFullscreenWindow(process, out var window))
+                    {
+                        continue;
+                    }
+
+                    seen.Add(process.Id);
+                    if (!fullscreenProcesses.ContainsKey(process.Id))
+                    {
+                        log.Write($"Full-screen application detected | Process={process.ProcessName} | PID={process.Id} | Path={RescueService.TryGetPath(process)}");
+                    }
+                    fullscreenProcesses[process.Id] = process.ProcessName;
+                    Evaluate(process, foregroundPid, window);
+                }
+                catch
+                {
+                    hangs.Remove(process.Id);
+                }
+            }
+        }
+
+        foreach (var stalePid in fullscreenProcesses.Keys.Where(pid => !seen.Contains(pid)).ToArray())
+        {
+            log.Write($"Full-screen application no longer active | Process={fullscreenProcesses[stalePid]} | PID={stalePid}");
+            fullscreenProcesses.Remove(stalePid);
+        }
+    }
+
+    private bool TryGetFullscreenWindow(Process process, out IntPtr window)
+    {
+        window = IntPtr.Zero;
+        if (process.Id == Environment.ProcessId ||
+            process.SessionId != currentSessionId ||
+            ProtectedSystemProcesses.Contains(process.ProcessName))
+        {
+            return false;
+        }
+
+        window = process.MainWindowHandle;
+        return NativeMethods.IsFullscreenWindow(window) && !IsWindowsSystemProcess(process);
+    }
+
+    private bool IsWindowsSystemProcess(Process process)
+    {
+        try
+        {
+            var path = process.MainModule?.FileName;
+            return !string.IsNullOrWhiteSpace(path) && IsUnderDirectory(path, windowsDirectory);
+        }
+        catch
+        {
+            // Packaged games can deny executable-path inspection. Their window
+            // geometry and current-session ownership are still usable.
+            return false;
+        }
+    }
+
+    private void Evaluate(Process process, uint foregroundPid, IntPtr? knownWindow = null)
     {
         bool hung;
         IntPtr window;
         try
         {
-            window = process.MainWindowHandle;
+            window = knownWindow ?? process.MainWindowHandle;
             hung = window != IntPtr.Zero && (NativeMethods.IsHungAppWindow(window) || !process.Responding);
         }
         catch
@@ -222,6 +322,25 @@ internal sealed class WatchdogContext : ApplicationContext
         log.Write($"Start-with-Windows changed | Enabled={startupItem.Checked}");
     }
 
+    private void ToggleFullscreenOverride()
+    {
+        settings.WatchAllFullscreenApps = !settings.WatchAllFullscreenApps;
+        settings.Save(settingsPath);
+        fullscreenOverrideItem.Checked = settings.WatchAllFullscreenApps;
+        hangs.Clear();
+        fullscreenProcesses.Clear();
+        RebuildWatchedAppsMenu();
+        log.Write($"Watch-all-full-screen-apps changed | Enabled={settings.WatchAllFullscreenApps}");
+        Poll();
+        trayIcon.ShowBalloonTip(
+            5000,
+            settings.WatchAllFullscreenApps ? "Full-screen override enabled" : "Configured watchlist restored",
+            settings.WatchAllFullscreenApps
+                ? "Full-screen applications are now discovered and monitored automatically."
+                : "Automatic monitoring now uses the saved application list.",
+            ToolTipIcon.Info);
+    }
+
     private void OpenSettings()
     {
         Process.Start(new ProcessStartInfo("notepad.exe", settingsPath) { UseShellExecute = true });
@@ -249,6 +368,13 @@ internal sealed class WatchdogContext : ApplicationContext
         watchedAppsItem.DropDownItems.Clear();
         manualRescueItem.DropDownItems.Clear();
         removeAppItem.DropDownItems.Clear();
+
+        if (settings.WatchAllFullscreenApps)
+        {
+            watchedAppsItem.DropDownItems.Add(
+                new ToolStripMenuItem("Full-screen override active; this list is saved for later.") { Enabled = false });
+            watchedAppsItem.DropDownItems.Add(new ToolStripSeparator());
+        }
 
         foreach (var processName in settings.ProcessNames.Order(StringComparer.OrdinalIgnoreCase))
         {
@@ -375,17 +501,6 @@ internal sealed class WatchdogContext : ApplicationContext
             return;
         }
 
-        var confirmation = MessageBox.Show(
-            $"Add {processName}?\n\nIf its foreground window remains unresponsive for {settings.HangThresholdSeconds} seconds, the watchdog will release cursor confinement and terminate its process tree.",
-            "Add Watched Application",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
-        if (confirmation != DialogResult.Yes)
-        {
-            return;
-        }
-
         settings.ProcessNames = settings.ProcessNames
             .Append(processName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -394,6 +509,11 @@ internal sealed class WatchdogContext : ApplicationContext
         log.Write($"Watched application added | Process={processName} | Source={source}");
         RebuildWatchedAppsMenu();
         UpdateTrayStatus();
+        trayIcon.ShowBalloonTip(
+            4000,
+            "Watched application added",
+            $"{processName} is now monitored for sustained foreground hangs.",
+            ToolTipIcon.Info);
     }
 
     private void RemoveApplication(string processName)
@@ -408,17 +528,6 @@ internal sealed class WatchdogContext : ApplicationContext
             return;
         }
 
-        var confirmation = MessageBox.Show(
-            $"Stop watching {processName}?",
-            "Remove Watched Application",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Question,
-            MessageBoxDefaultButton.Button2);
-        if (confirmation != DialogResult.Yes)
-        {
-            return;
-        }
-
         settings.ProcessNames = settings.ProcessNames
             .Where(name => !name.Equals(processName, StringComparison.OrdinalIgnoreCase))
             .ToArray();
@@ -426,6 +535,11 @@ internal sealed class WatchdogContext : ApplicationContext
         log.Write($"Watched application removed | Process={processName}");
         RebuildWatchedAppsMenu();
         UpdateTrayStatus();
+        trayIcon.ShowBalloonTip(
+            4000,
+            "Watched application removed",
+            $"{processName} is no longer monitored.",
+            ToolTipIcon.Info);
     }
 
     private void UpdateTrayStatus()
@@ -434,9 +548,21 @@ internal sealed class WatchdogContext : ApplicationContext
         cancelItem.Enabled = active.Length > 0;
         if (active.Length == 0)
         {
-            statusItem.Text = settings.ProcessNames.Length == 1
-                ? $"Watching {settings.ProcessNames[0]}"
-                : $"Watching {settings.ProcessNames.Length} applications";
+            if (settings.WatchAllFullscreenApps)
+            {
+                statusItem.Text = fullscreenProcesses.Count switch
+                {
+                    0 => "Watching for full-screen applications",
+                    1 => "Watching 1 full-screen application",
+                    _ => $"Watching {fullscreenProcesses.Count} full-screen applications"
+                };
+            }
+            else
+            {
+                statusItem.Text = settings.ProcessNames.Length == 1
+                    ? $"Watching {settings.ProcessNames[0]}"
+                    : $"Watching {settings.ProcessNames.Length} applications";
+            }
             trayIcon.Text = "Application Hang Watchdog";
             return;
         }

@@ -13,6 +13,7 @@ internal sealed class WatchdogSettings
     public int HangThresholdSeconds { get; set; } = 30;
     public int WarningSecondsBeforeRescue { get; set; } = 15;
     public bool RequireForegroundDuringHang { get; set; } = true;
+    public bool WatchAllFullscreenApps { get; set; }
 
     public static WatchdogSettings Load(string path)
     {

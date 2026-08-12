@@ -1,8 +1,9 @@
 # Application Hang Watchdog
 
-A small Windows tray app that recovers the desktop when Fallout: New Vegas, or
-another configured full-screen application, becomes unresponsive and traps the
-mouse and keyboard.
+A small Windows tray app that recovers the desktop when a full-screen
+application becomes unresponsive and traps the mouse and keyboard. It can
+automatically discover full-screen applications or monitor a saved list, with
+Fallout: New Vegas provided as the default target.
 
 [Change history](CHANGELOG.md)
 
@@ -25,7 +26,16 @@ window from outside the game, call Windows to release cursor confinement, and
 force-terminate the watched process tree.
 
 The default target is `FalloutNV.exe`. Other applications can be added from a
-list of running apps or by selecting an executable.
+list of running apps or by selecting an executable. An optional override can
+instead discover and monitor full-screen applications automatically.
+
+___________________________________________________
+
+ai: *What this is not is a replacement for Task Manager.*
+
+me: *Well, it's also not a pizza. Not helpful.*
+
+ai: *\*boop\** 👉👃
 
 ## Safeguards
 
@@ -36,6 +46,9 @@ list of running apps or by selecting an executable.
 - Warns about 15 seconds before rescue and allows cancellation.
 - Stores only compact, event-driven incident entries. It does not create dumps
   or continually record activity.
+- Optionally discovers full-screen application windows automatically. System
+  shell and known game-overlay helper processes are excluded, and ordinary
+  maximized windows are not treated as full-screen.
 
 This app deliberately force-terminates a confirmed hung process tree. Unsaved
 work in that application will be lost.
@@ -64,11 +77,21 @@ No administrator access is normally required.
 - **Incident Log > Open** opens the compact event log.
 - **Incident Log > Clear...** replaces the log with one timestamped clear marker.
 - **Open Settings** opens advanced JSON settings.
+- **Watch All Full-Screen Apps** overrides the saved application list and
+  dynamically monitors applications while their windows cover an entire
+  monitor.
 - **Start With Windows** launches the watchdog automatically when you sign in.
 
 Tray changes are saved immediately. Targets are stored by executable process
 name, so normal application updates can move the executable without breaking
-the rule. At least one watched application must remain.
+the rule. Adding or removing a target does not open a separate confirmation
+dialog. A non-blocking notification reports success. At least one watched
+application must remain.
+
+When **Watch All Full-Screen Apps** is selected, the saved list remains intact
+but is not used for automatic monitoring. Full-screen applications enter and
+leave monitoring automatically as their window state changes. Turning the
+override off immediately restores the saved list.
 
 The running-app list is limited to interactive applications in the current
 user session. Windows system components and helper windows are hidden; use
@@ -94,6 +117,9 @@ The `_note` field in `settings.json` explains edit behavior inside the file.
 Manual edits take effect after restart; tray-menu changes apply immediately.
 Existing installations using the earlier data-folder name continue using that
 folder so their settings and incident history remain intact.
+
+`WatchAllFullscreenApps` records the full-screen override selected in the tray
+menu. It defaults to `false` for existing and new installations.
 
 ### Advanced setting
 
