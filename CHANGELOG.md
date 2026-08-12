@@ -1,5 +1,15 @@
 # Change History
 
+## 1.1.1 - 2026-08-11
+
+- Preserved foreground evidence for the lifetime of each current full-screen
+  session. Alt+Tabbing toward Task Manager after a freeze no longer prevents an
+  otherwise eligible automatic rescue.
+- Added Windows foreground-change event tracking so a full-screen application
+  can establish foreground evidence between the normal two-second polls.
+- Tied foreground evidence to both the process ID and window handle and cleared
+  it when the application exits, leaves full-screen, or replaces its window.
+
 ## 1.1.0 - 2026-08-11
 
 - Removed the blocking confirmation dialog when adding a watched application.
