@@ -41,8 +41,9 @@ ai: *\*boop\** 👉👃
 
 - Polls every 2 seconds.
 - Requires 30 continuous seconds of nonresponse.
-- Requires the watched application to have been in the foreground during the
-  hang.
+- Requires configured targets to have been foreground during the hang. In
+  full-screen override mode, foreground evidence from any point in the current
+  full-screen session also qualifies.
 - Warns about 15 seconds before rescue and allows cancellation.
 - Stores only compact, event-driven incident entries. It does not create dumps
   or continually record activity.
@@ -92,6 +93,13 @@ When **Watch All Full-Screen Apps** is selected, the saved list remains intact
 but is not used for automatic monitoring. Full-screen applications enter and
 leave monitoring automatically as their window state changes. Turning the
 override off immediately restores the saved list.
+
+The full-screen override remembers whether each current full-screen window has
+held foreground focus. If you Alt+Tab toward Task Manager after the application
+freezes, that earlier evidence remains valid. Windows foreground-change events
+capture focus transitions between the normal two-second polls. The evidence is
+tied to the process ID and window handle and is discarded when the application
+exits, leaves full-screen, or replaces its full-screen window.
 
 The running-app list is limited to interactive applications in the current
 user session. Windows system components and helper windows are hidden; use

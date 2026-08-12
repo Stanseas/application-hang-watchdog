@@ -45,7 +45,9 @@ internal sealed class WatchdogContext : ApplicationContext
     private readonly ToolStripMenuItem removeAppItem;
     private readonly System.Windows.Forms.Timer timer;
     private readonly Dictionary<int, HangState> hangs = [];
-    private readonly Dictionary<int, string> fullscreenProcesses = [];
+    private readonly FullscreenSessionTracker fullscreenSessions = new();
+    private readonly NativeMethods.WinEventDelegate foregroundChangedHandler;
+    private IntPtr foregroundHook;
     private readonly int currentSessionId = Process.GetCurrentProcess().SessionId;
     private readonly string windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
@@ -99,6 +101,13 @@ internal sealed class WatchdogContext : ApplicationContext
             Visible = true
         };
         trayIcon.DoubleClick += (_, _) => log.Open();
+
+        foregroundChangedHandler = OnForegroundChanged;
+        foregroundHook = NativeMethods.InstallForegroundHook(foregroundChangedHandler);
+        if (foregroundHook == IntPtr.Zero)
+        {
+            log.Write("Foreground event hook unavailable; full-screen foreground evidence will use polling only.");
+        }
 
         timer = new System.Windows.Forms.Timer
         {
@@ -157,12 +166,16 @@ internal sealed class WatchdogContext : ApplicationContext
                     }
 
                     seen.Add(process.Id);
-                    if (!fullscreenProcesses.ContainsKey(process.Id))
+                    var observation = fullscreenSessions.Observe(
+                        process.Id,
+                        process.ProcessName,
+                        window,
+                        foregroundPid == process.Id);
+                    if (observation.IsNew)
                     {
-                        log.Write($"Full-screen application detected | Process={process.ProcessName} | PID={process.Id} | Path={RescueService.TryGetPath(process)}");
+                        log.Write($"Full-screen application detected | Process={process.ProcessName} | PID={process.Id} | ForegroundEvidence={observation.WasForeground} | Path={RescueService.TryGetPath(process)}");
                     }
-                    fullscreenProcesses[process.Id] = process.ProcessName;
-                    Evaluate(process, foregroundPid, window);
+                    Evaluate(process, foregroundPid, window, observation.WasForeground);
                 }
                 catch
                 {
@@ -171,10 +184,45 @@ internal sealed class WatchdogContext : ApplicationContext
             }
         }
 
-        foreach (var stalePid in fullscreenProcesses.Keys.Where(pid => !seen.Contains(pid)).ToArray())
+        foreach (var removed in fullscreenSessions.RemoveExcept(seen))
         {
-            log.Write($"Full-screen application no longer active | Process={fullscreenProcesses[stalePid]} | PID={stalePid}");
-            fullscreenProcesses.Remove(stalePid);
+            log.Write($"Full-screen application no longer active | Process={removed.ProcessName} | PID={removed.ProcessId}");
+        }
+    }
+
+    private void OnForegroundChanged(
+        IntPtr hook,
+        uint eventType,
+        IntPtr window,
+        int objectId,
+        int childId,
+        uint eventThread,
+        uint eventTime)
+    {
+        if (!settings.WatchAllFullscreenApps ||
+            eventType != NativeMethods.EventSystemForeground ||
+            window == IntPtr.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(window, out var processId);
+        if (processId == 0 || processId > int.MaxValue)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            if (TryGetFullscreenWindow(process, out var fullscreenWindow) && fullscreenWindow == window)
+            {
+                fullscreenSessions.NoteForeground(process.Id, window);
+            }
+        }
+        catch
+        {
+            // The foreground process can exit while Windows delivers the event.
         }
     }
 
@@ -207,7 +255,11 @@ internal sealed class WatchdogContext : ApplicationContext
         }
     }
 
-    private void Evaluate(Process process, uint foregroundPid, IntPtr? knownWindow = null)
+    private void Evaluate(
+        Process process,
+        uint foregroundPid,
+        IntPtr? knownWindow = null,
+        bool foregroundDuringFullscreenSession = false)
     {
         bool hung;
         IntPtr window;
@@ -236,12 +288,12 @@ internal sealed class WatchdogContext : ApplicationContext
             state = new HangState
             {
                 FirstDetected = DateTimeOffset.Now,
-                WasForeground = foregroundPid == process.Id
+                WasForeground = foregroundPid == process.Id || foregroundDuringFullscreenSession
             };
             hangs[process.Id] = state;
             log.Write($"Hang detected | Process={process.ProcessName} | PID={process.Id} | Foreground={state.WasForeground} | Path={RescueService.TryGetPath(process)} | Uptime={RescueService.TryGetUptime(process)}");
         }
-        else if (foregroundPid == process.Id)
+        else if (foregroundPid == process.Id || foregroundDuringFullscreenSession)
         {
             state.WasForeground = true;
         }
@@ -272,7 +324,7 @@ internal sealed class WatchdogContext : ApplicationContext
     {
         try
         {
-            log.Write($"Automatic rescue started | PID={process.Id} | HungFor={(DateTimeOffset.Now - state.FirstDetected).TotalSeconds:F1}s | ForegroundDuringHang={state.WasForeground} | Window=0x{window.ToInt64():X}");
+            log.Write($"Automatic rescue started | PID={process.Id} | HungFor={(DateTimeOffset.Now - state.FirstDetected).TotalSeconds:F1}s | ForegroundEvidence={state.WasForeground} | Window=0x{window.ToInt64():X}");
             NativeMethods.ClipCursor(IntPtr.Zero);
             process.Kill(entireProcessTree: true);
             process.WaitForExit(5000);
@@ -328,7 +380,7 @@ internal sealed class WatchdogContext : ApplicationContext
         settings.Save(settingsPath);
         fullscreenOverrideItem.Checked = settings.WatchAllFullscreenApps;
         hangs.Clear();
-        fullscreenProcesses.Clear();
+        fullscreenSessions.Clear();
         RebuildWatchedAppsMenu();
         log.Write($"Watch-all-full-screen-apps changed | Enabled={settings.WatchAllFullscreenApps}");
         Poll();
@@ -550,11 +602,11 @@ internal sealed class WatchdogContext : ApplicationContext
         {
             if (settings.WatchAllFullscreenApps)
             {
-                statusItem.Text = fullscreenProcesses.Count switch
+                statusItem.Text = fullscreenSessions.Count switch
                 {
                     0 => "Watching for full-screen applications",
                     1 => "Watching 1 full-screen application",
-                    _ => $"Watching {fullscreenProcesses.Count} full-screen applications"
+                    _ => $"Watching {fullscreenSessions.Count} full-screen applications"
                 };
             }
             else
@@ -577,6 +629,11 @@ internal sealed class WatchdogContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         timer.Stop();
+        if (foregroundHook != IntPtr.Zero)
+        {
+            NativeMethods.UnhookWinEvent(foregroundHook);
+            foregroundHook = IntPtr.Zero;
+        }
         trayIcon.Visible = false;
         trayIcon.Dispose();
         log.Write("Watchdog exited.");

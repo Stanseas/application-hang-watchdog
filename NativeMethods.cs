@@ -4,6 +4,18 @@ namespace ApplicationHangWatchdog;
 
 internal static class NativeMethods
 {
+    internal delegate void WinEventDelegate(
+        IntPtr hook,
+        uint eventType,
+        IntPtr window,
+        int objectId,
+        int childId,
+        uint eventThread,
+        uint eventTime);
+
+    internal const uint EventSystemForeground = 0x0003;
+    private const uint WineventOutOfContext = 0x0000;
+    private const uint WineventSkipOwnProcess = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
     private const int DwmwaCloaked = 14;
     private const uint MonitorDefaultToNull = 0;
@@ -61,6 +73,19 @@ internal static class NativeMethods
         out NativeRect value,
         int valueSize);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr eventHookModule,
+        WinEventDelegate callback,
+        uint processId,
+        uint threadId,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    internal static extern bool UnhookWinEvent(IntPtr hook);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(
         IntPtr windowHandle,
@@ -78,6 +103,18 @@ internal static class NativeMethods
 
         GetWindowThreadProcessId(window, out var processId);
         return processId;
+    }
+
+    internal static IntPtr InstallForegroundHook(WinEventDelegate callback)
+    {
+        return SetWinEventHook(
+            EventSystemForeground,
+            EventSystemForeground,
+            IntPtr.Zero,
+            callback,
+            0,
+            0,
+            WineventOutOfContext | WineventSkipOwnProcess);
     }
 
     internal static bool IsFullscreenWindow(IntPtr windowHandle)
