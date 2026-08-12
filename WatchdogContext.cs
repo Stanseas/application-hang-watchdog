@@ -4,25 +4,6 @@ namespace ApplicationHangWatchdog;
 
 internal sealed class WatchdogContext : ApplicationContext
 {
-    private static readonly HashSet<string> ProtectedSystemProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "ApplicationFrameHost",
-        "dwm",
-        "EOSOverlayRenderer-Win64-Shipping",
-        "explorer",
-        "GameBar",
-        "GameBarFTServer",
-        "LockApp",
-        "LogonUI",
-        "NVIDIA Overlay",
-        "SearchHost",
-        "ShellExperienceHost",
-        "StartMenuExperienceHost",
-        "steamwebhelper",
-        "SystemSettings",
-        "TextInputHost"
-    };
-
     private sealed class HangState
     {
         public required DateTimeOffset FirstDetected { get; init; }
@@ -46,10 +27,9 @@ internal sealed class WatchdogContext : ApplicationContext
     private readonly System.Windows.Forms.Timer timer;
     private readonly Dictionary<int, HangState> hangs = [];
     private readonly FullscreenSessionTracker fullscreenSessions = new();
+    private readonly WatchEligibilityPolicy watchEligibility = new();
     private readonly NativeMethods.WinEventDelegate foregroundChangedHandler;
     private IntPtr foregroundHook;
-    private readonly int currentSessionId = Process.GetCurrentProcess().SessionId;
-    private readonly string windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
     public WatchdogContext(WatchdogSettings settings, IncidentLog log, string settingsPath)
     {
@@ -137,6 +117,11 @@ internal sealed class WatchdogContext : ApplicationContext
                 {
                     using (process)
                     {
+                        if (!watchEligibility.IsEligible(process))
+                        {
+                            continue;
+                        }
+
                         seen.Add(process.Id);
                         Evaluate(process, foregroundPid);
                     }
@@ -229,30 +214,13 @@ internal sealed class WatchdogContext : ApplicationContext
     private bool TryGetFullscreenWindow(Process process, out IntPtr window)
     {
         window = IntPtr.Zero;
-        if (process.Id == Environment.ProcessId ||
-            process.SessionId != currentSessionId ||
-            ProtectedSystemProcesses.Contains(process.ProcessName))
+        if (!watchEligibility.IsEligible(process))
         {
             return false;
         }
 
         window = process.MainWindowHandle;
-        return NativeMethods.IsFullscreenWindow(window) && !IsWindowsSystemProcess(process);
-    }
-
-    private bool IsWindowsSystemProcess(Process process)
-    {
-        try
-        {
-            var path = process.MainModule?.FileName;
-            return !string.IsNullOrWhiteSpace(path) && IsUnderDirectory(path, windowsDirectory);
-        }
-        catch
-        {
-            // Packaged games can deny executable-path inspection. Their window
-            // geometry and current-session ownership are still usable.
-            return false;
-        }
+        return NativeMethods.IsFullscreenWindow(window);
     }
 
     private void Evaluate(
@@ -457,20 +425,16 @@ internal sealed class WatchdogContext : ApplicationContext
         addRunningAppItem.DropDownItems.Clear();
 
         var runningApps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var currentSessionId = Process.GetCurrentProcess().SessionId;
-        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         foreach (var process in Process.GetProcesses())
         {
             using (process)
             {
                 try
                 {
-                    if (process.Id == Environment.ProcessId ||
-                        process.SessionId != currentSessionId ||
+                    if (!watchEligibility.IsEligible(process) ||
                         process.MainWindowHandle == IntPtr.Zero ||
                         string.IsNullOrWhiteSpace(process.MainWindowTitle) ||
                         process.MainWindowTitle.StartsWith('_') ||
-                        IsUnderDirectory(process.MainModule?.FileName, windowsDirectory) ||
                         settings.ProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
                     {
                         continue;
@@ -500,18 +464,6 @@ internal sealed class WatchdogContext : ApplicationContext
         }
     }
 
-    private static bool IsUnderDirectory(string? filePath, string directoryPath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return true;
-        }
-
-        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath)) + Path.DirectorySeparatorChar;
-        var file = Path.GetFullPath(filePath);
-        return file.StartsWith(directory, StringComparison.OrdinalIgnoreCase);
-    }
-
     private void AddApplication()
     {
         using var picker = new OpenFileDialog
@@ -528,6 +480,16 @@ internal sealed class WatchdogContext : ApplicationContext
         }
 
         var processName = Path.GetFileNameWithoutExtension(picker.FileName);
+        if (!watchEligibility.IsEligibleSelection(processName, picker.FileName))
+        {
+            trayIcon.ShowBalloonTip(
+                4000,
+                "Application excluded",
+                $"{processName} is a protected system or helper application and cannot be watched.",
+                ToolTipIcon.Info);
+            return;
+        }
+
         if (settings.ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase))
         {
             MessageBox.Show(
@@ -543,6 +505,16 @@ internal sealed class WatchdogContext : ApplicationContext
 
     private void AddProcessName(string processName, string source)
     {
+        if (!watchEligibility.IsEligibleProcessName(processName))
+        {
+            trayIcon.ShowBalloonTip(
+                4000,
+                "Application excluded",
+                $"{processName} is a protected system or helper application and cannot be watched.",
+                ToolTipIcon.Info);
+            return;
+        }
+
         if (settings.ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase))
         {
             MessageBox.Show(

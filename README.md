@@ -71,8 +71,9 @@ No administrator access is normally required.
 
 - **Manual Rescue** selects one watched application for immediate rescue.
 - **Cancel Current Rescue** suppresses the active countdown.
-- **Watched Apps > Add Running Application** lists open apps with visible
-  windows.
+- **Watched Apps > Add Running Application** lists eligible open apps with
+  visible windows. It uses the same application-window, system-path, and
+  session eligibility rules as automatic full-screen discovery.
 - **Watched Apps > Add Application...** selects an executable from disk.
 - **Watched Apps > Remove Application** removes a target.
 - **Incident Log > Open** opens the compact event log.

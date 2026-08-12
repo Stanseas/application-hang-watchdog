@@ -1,5 +1,15 @@
 # Change History
 
+## 1.1.2 - 2026-08-11
+
+- Centralized application eligibility so automatic full-screen discovery,
+  saved-list monitoring, the running-application picker, and executable
+  selection all use the same system, shell, and overlay exclusions.
+- Replaced vendor-specific overlay exceptions with a window-role rule that
+  rejects Windows tool windows and no-activate surfaces. The same structural
+  rule prevents older or manually edited settings from bypassing the monitoring
+  safety policy.
+
 ## 1.1.1 - 2026-08-11
 
 - Preserved foreground evidence for the lifetime of each current full-screen
