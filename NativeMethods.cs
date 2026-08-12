@@ -18,6 +18,9 @@ internal static class NativeMethods
     private const uint WineventSkipOwnProcess = 0x0002;
     private const int DwmwaExtendedFrameBounds = 9;
     private const int DwmwaCloaked = 14;
+    private const int GwlExStyle = -20;
+    private const long WsExToolWindow = 0x00000080L;
+    private const long WsExNoActivate = 0x08000000L;
     private const uint MonitorDefaultToNull = 0;
     private const int FullscreenEdgeTolerance = 3;
 
@@ -56,6 +59,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr windowHandle);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr windowHandle, int index);
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr windowHandle, out NativeRect rectangle);
@@ -158,6 +164,17 @@ internal static class NativeMethods
                    out visibleBounds,
                    Marshal.SizeOf<NativeRect>()) == 0 &&
                RectanglesMatch(visibleBounds, monitorInfo.Monitor);
+    }
+
+    internal static bool IsApplicationWindow(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var extendedStyle = GetWindowLongPtr(windowHandle, GwlExStyle).ToInt64();
+        return (extendedStyle & (WsExToolWindow | WsExNoActivate)) == 0;
     }
 
     private static bool RectanglesMatch(NativeRect windowBounds, NativeRect monitorBounds)
